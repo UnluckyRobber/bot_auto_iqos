@@ -1,0 +1,219 @@
+import tkinter as tk
+from tkinter import ttk, messagebox
+import json
+import os
+
+PLIK_ZADAN = "zadania.json"
+
+class BotControllerApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Panel Sterowania - Bot Audytowy")
+        self.root.geometry("900x650")
+        
+        self.zadania = []
+        
+        # Główne ramki
+        self.frame_inputs = ttk.LabelFrame(self.root, text="Dane Profilu", padding=(10, 10))
+        self.frame_inputs.pack(fill="x", padx=10, pady=5)
+        
+        self.frame_list = ttk.LabelFrame(self.root, text="Kolejka Zadań", padding=(10, 10))
+        self.frame_list.pack(fill="both", expand=True, padx=10, pady=5)
+        
+        self.utworz_pola_input()
+        self.utworz_liste_zadan()
+        
+        # Wczytanie poprzednich zadań przy starcie
+        self.wczytaj_z_pliku()
+
+    def utworz_pola_input(self):
+        # Definicja zmiennych
+        self.var_uuid = tk.StringVar()
+        self.var_zachowanie = tk.StringVar()
+        self.var_email = tk.StringVar()
+        self.var_haslo = tk.StringVar()
+        self.var_imie = tk.StringVar()
+        self.var_nazwisko = tk.StringVar()
+        self.var_dzien = tk.StringVar()
+        self.var_miesiac = tk.StringVar()
+        self.var_rok = tk.StringVar()
+        self.var_ulica = tk.StringVar()
+        self.var_miasto = tk.StringVar()
+        self.var_telefon = tk.StringVar()
+
+        # Opcje profili (dokładne nazwy funkcji z main.py)
+        profile_opcje = [
+            "profile_zdezorientowany", "profile_mala_klawiatura", 
+            "profile_rozproszony", "profile_sceptyk", 
+            "profile_wizualny", "profile_zabiegany", "profile_nerwowy"
+        ]
+
+        # Wiersz 0: UUID i Zachowanie
+        ttk.Label(self.frame_inputs, text="UUID Octo:").grid(row=0, column=0, sticky="w", pady=2)
+        ttk.Entry(self.frame_inputs, textvariable=self.var_uuid, width=35).grid(row=0, column=1, padx=5, pady=2)
+        
+        ttk.Label(self.frame_inputs, text="Zachowanie Bota:").grid(row=0, column=2, sticky="w", padx=(15,0), pady=2)
+        combo_zachowanie = ttk.Combobox(self.frame_inputs, textvariable=self.var_zachowanie, values=profile_opcje, state="readonly", width=30)
+        combo_zachowanie.grid(row=0, column=3, padx=5, pady=2)
+        if profile_opcje: combo_zachowanie.current(0)
+
+        # Wiersz 1: Email i Hasło
+        ttk.Label(self.frame_inputs, text="E-mail:").grid(row=1, column=0, sticky="w", pady=2)
+        ttk.Entry(self.frame_inputs, textvariable=self.var_email, width=35).grid(row=1, column=1, padx=5, pady=2)
+        
+        ttk.Label(self.frame_inputs, text="Hasło:").grid(row=1, column=2, sticky="w", padx=(15,0), pady=2)
+        ttk.Entry(self.frame_inputs, textvariable=self.var_haslo, width=32).grid(row=1, column=3, padx=5, pady=2)
+
+        # Wiersz 2: Imię i Nazwisko
+        ttk.Label(self.frame_inputs, text="Imię:").grid(row=2, column=0, sticky="w", pady=2)
+        ttk.Entry(self.frame_inputs, textvariable=self.var_imie, width=35).grid(row=2, column=1, padx=5, pady=2)
+        
+        ttk.Label(self.frame_inputs, text="Nazwisko:").grid(row=2, column=2, sticky="w", padx=(15,0), pady=2)
+        ttk.Entry(self.frame_inputs, textvariable=self.var_nazwisko, width=32).grid(row=2, column=3, padx=5, pady=2)
+
+        # Wiersz 3: Data urodzenia
+        frame_data = ttk.Frame(self.frame_inputs)
+        frame_data.grid(row=3, column=1, sticky="w", padx=5, pady=2)
+        ttk.Label(self.frame_inputs, text="Data Ur. (DD/MM/YYYY):").grid(row=3, column=0, sticky="w", pady=2)
+        
+        ttk.Entry(frame_data, textvariable=self.var_dzien, width=5).pack(side="left")
+        ttk.Label(frame_data, text=" / ").pack(side="left")
+        ttk.Entry(frame_data, textvariable=self.var_miesiac, width=5).pack(side="left")
+        ttk.Label(frame_data, text=" / ").pack(side="left")
+        ttk.Entry(frame_data, textvariable=self.var_rok, width=8).pack(side="left")
+
+        # Wiersz 4: Adres
+        ttk.Label(self.frame_inputs, text="Ulica i nr:").grid(row=4, column=0, sticky="w", pady=2)
+        ttk.Entry(self.frame_inputs, textvariable=self.var_ulica, width=35).grid(row=4, column=1, padx=5, pady=2)
+        
+        ttk.Label(self.frame_inputs, text="Miasto:").grid(row=4, column=2, sticky="w", padx=(15,0), pady=2)
+        ttk.Entry(self.frame_inputs, textvariable=self.var_miasto, width=32).grid(row=4, column=3, padx=5, pady=2)
+
+        # Wiersz 5: Telefon i Przycisk Dodania
+        ttk.Label(self.frame_inputs, text="Telefon:").grid(row=5, column=0, sticky="w", pady=2)
+        ttk.Entry(self.frame_inputs, textvariable=self.var_telefon, width=35).grid(row=5, column=1, padx=5, pady=2)
+
+        btn_dodaj = tk.Button(self.frame_inputs, text="➕ Dodaj do Kolejki", bg="#4CAF50", fg="white", font=("Arial", 10, "bold"), command=self.dodaj_zadanie)
+        btn_dodaj.grid(row=5, column=3, sticky="e", padx=5, pady=10)
+
+    def utworz_liste_zadan(self):
+        kolumny = ("uuid", "profil", "email", "imie", "nazwisko", "telefon")
+        self.drzewo = ttk.Treeview(self.frame_list, columns=kolumny, show="headings", height=10)
+        
+        self.drzewo.heading("uuid", text="UUID Octo")
+        self.drzewo.heading("profil", text="Profil Zachowania")
+        self.drzewo.heading("email", text="E-mail")
+        self.drzewo.heading("imie", text="Imię")
+        self.drzewo.heading("nazwisko", text="Nazwisko")
+        self.drzewo.heading("telefon", text="Telefon")
+
+        self.drzewo.column("uuid", width=150)
+        self.drzewo.column("profil", width=150)
+        self.drzewo.column("email", width=180)
+        self.drzewo.column("imie", width=100)
+        self.drzewo.column("nazwisko", width=100)
+        self.drzewo.column("telefon", width=100)
+        
+        self.drzewo.pack(fill="both", expand=True, padx=5, pady=5)
+
+        # Ramka na dolne przyciski
+        frame_przyciski = ttk.Frame(self.frame_list)
+        frame_przyciski.pack(fill="x", pady=5)
+
+        btn_usun = tk.Button(frame_przyciski, text="❌ Usuń zaznaczone", bg="#f44336", fg="white", command=self.usun_zaznaczone)
+        btn_usun.pack(side="left", padx=5)
+
+        btn_wyczysc = tk.Button(frame_przyciski, text="🗑 Wyczyść formularz", command=self.wyczysc_pola)
+        btn_wyczysc.pack(side="left", padx=5)
+
+        btn_zapisz = tk.Button(frame_przyciski, text="💾 Zapisz do Pliku (zadania.json)", bg="#2196F3", fg="white", font=("Arial", 10, "bold"), command=self.zapisz_do_pliku)
+        btn_zapisz.pack(side="right", padx=5)
+
+    def dodaj_zadanie(self):
+        # Walidacja podstawowa
+        if not self.var_uuid.get() or not self.var_email.get():
+            messagebox.showwarning("Błąd", "Pola UUID oraz E-mail są wymagane!")
+            return
+
+        nowe_zadanie = {
+            "uuid": self.var_uuid.get().strip(),
+            "zachowanie": self.var_zachowanie.get(),
+            "dane": {
+                "email": self.var_email.get().strip(),
+                "haslo": self.var_haslo.get().strip(),
+                "imie": self.var_imie.get().strip(),
+                "nazwisko": self.var_nazwisko.get().strip(),
+                "dzien_ur": self.var_dzien.get().strip(),
+                "miesiac_ur": self.var_miesiac.get().strip(),
+                "rok_ur": self.var_rok.get().strip(),
+                "ulica": self.var_ulica.get().strip(),
+                "miasto": self.var_miasto.get().strip(),
+                "telefon": self.var_telefon.get().strip()
+            }
+        }
+        
+        self.zadania.append(nowe_zadanie)
+        self.odswiez_tabele()
+        self.wyczysc_pola()
+
+    def odswiez_tabele(self):
+        # Usuń wszystko z widoku
+        for item in self.drzewo.get_children():
+            self.drzewo.delete(item)
+            
+        # Dodaj na nowo z pamięci
+        for z in self.zadania:
+            self.drzewo.insert("", "end", values=(
+                z["uuid"], z["zachowanie"], z["dane"]["email"], 
+                z["dane"]["imie"], z["dane"]["nazwisko"], z["dane"]["telefon"]
+            ))
+
+    def usun_zaznaczone(self):
+        selected = self.drzewo.selection()
+        if not selected: return
+        
+        for item in selected:
+            # Szukamy po adresie e-mail i UUID, aby usunąć z pamięci
+            wartosci = self.drzewo.item(item, "values")
+            self.zadania = [z for z in self.zadania if not (z["uuid"] == wartosci[0] and z["dane"]["email"] == wartosci[2])]
+            self.drzewo.delete(item)
+
+    def wyczysc_pola(self):
+        # Zostawiamy puste pola dla wygody, ale np. rok można zresetować na stałą
+        self.var_uuid.set("")
+        self.var_email.set("")
+        self.var_haslo.set("")
+        self.var_imie.set("")
+        self.var_nazwisko.set("")
+        self.var_dzien.set("")
+        self.var_miesiac.set("")
+        self.var_rok.set("")
+        self.var_ulica.set("")
+        self.var_miasto.set("")
+        self.var_telefon.set("")
+
+    def zapisz_do_pliku(self):
+        if not self.zadania:
+            messagebox.showinfo("Informacja", "Kolejka jest pusta. Nie ma czego zapisywać.")
+            return
+            
+        try:
+            with open(PLIK_ZADAN, "w", encoding="utf-8") as f:
+                json.dump(self.zadania, f, indent=4, ensure_ascii=False)
+            messagebox.showinfo("Sukces", f"Zapisano {len(self.zadania)} zadań do {PLIK_ZADAN}.\nMożesz teraz uruchomić bota!")
+        except Exception as e:
+            messagebox.showerror("Błąd", f"Wystąpił błąd podczas zapisu:\n{e}")
+
+    def wczytaj_z_pliku(self):
+        if os.path.exists(PLIK_ZADAN):
+            try:
+                with open(PLIK_ZADAN, "r", encoding="utf-8") as f:
+                    self.zadania = json.load(f)
+                self.odswiez_tabele()
+            except Exception:
+                pass # Ignorujemy błędy przy starcie (np. uszkodzony JSON)
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = BotControllerApp(root)
+    root.mainloop()

@@ -1,0 +1,136 @@
+# main.py
+import asyncio
+import requests
+from playwright.async_api import async_playwright
+from utils import zmien_ip_przez_adb
+
+# Importujemy profile z naszego nowego folderu
+from profiles.zdezorientowany import profile_zdezorientowany
+from profiles.mala_klawiatura import profile_mala_klawiatura
+from profiles.rozproszony import profile_rozproszony
+from profiles.sceptyk import profile_sceptyk
+from profiles.wizualny import profile_wizualny
+from profiles.zabiegany import profile_zabiegany
+from profiles.nerwowy import profile_nerwowy
+
+# ==========================================
+# KONFIGURACJA MAPOWANIA PROFILI I DANYCH
+# ==========================================
+ZADANIA_TESTOWE = [
+    {
+        "uuid": "", 
+        "zachowanie": profile_zdezorientowany,
+        "dane": {
+            "email": "aleksanderbrzozowski@vp.pl", "haslo": "Aleksander212@", 
+            "imie": "Aleksander", "nazwisko": "Brzozowski", 
+            "dzien_ur": "22", "miesiac_ur": "03", "rok_ur": "2004", 
+            "ulica": "ul. Mazurska 88", "miasto": "Koszwały", "telefon": "511825200"
+        }
+    },
+    {
+        "uuid": "", 
+        "zachowanie": profile_mala_klawiatura,
+        "dane": {
+            "email": "nikodem.dudek@vp.pl", "haslo": "Nikodem1313@", 
+            "imie": "Nikodem", "nazwisko": "Dudek", 
+            "dzien_ur": "13", "miesiac_ur": "09", "rok_ur": "1989", 
+            "ulica": "Rataja 98", "miasto": "Skierniewice", "telefon": "511817437"
+        }
+    },
+    {
+        "uuid": "", 
+        "zachowanie": profile_rozproszony,
+        "dane": {
+            "email": "kingakruk@opoczta.pl", "haslo": "Kinga19@", 
+            "imie": "Kinga", "nazwisko": "Kruk", 
+            "dzien_ur": "27", "miesiac_ur": "10", "rok_ur": "2003", 
+            "ulica": "Krasińskiego 86", "miasto": "Sanok", "telefon": "511825197"
+        }
+    },
+    {
+        "uuid": "", 
+        "zachowanie": profile_sceptyk,
+        "dane": {
+            "email": "kajakonieczna@opoczta.pl", "haslo": "Kaja23!@", 
+            "imie": "Kaja", "nazwisko": "Konieczna", 
+            "dzien_ur": "11", "miesiac_ur": "07", "rok_ur": "1988", 
+            "ulica": "Spokojna", "miasto": "Nysa", "telefon": "511817442"
+        }
+    },
+    {
+        "uuid": "", 
+        "zachowanie": profile_wizualny,
+        "dane": {
+            "email": "konrad.szulc@vip.onet.pl", "haslo": "Konrad@123!", 
+            "imie": "Konrad", "nazwisko": "Szulc", 
+            "dzien_ur": "17", "miesiac_ur": "01", "rok_ur": "1995", 
+            "ulica": "Studzienna 92", "miasto": "Zgierz", "telefon": "511825172"
+        }
+    },
+    {
+        "uuid": "", 
+        "zachowanie": profile_zabiegany,
+        "dane": {
+            "email": "dariuszratajczak@vp.pl", "haslo": "Dariusz23!", 
+            "imie": "Dariusz", "nazwisko": "Ratajczak", 
+            "dzien_ur": "30", "miesiac_ur": "01", "rok_ur": "2004", 
+            "ulica": "Szczecińska", "miasto": "Przemyśl", "telefon": "511825039"
+        }
+    }
+]
+
+# ==========================================
+# KONTROLER URUCHOMIENIA
+# ==========================================
+async def main():
+    print("[*] Rozpoczynam masowy audyt bezpieczeństwa...")
+    
+    for zadanie in ZADANIA_TESTOWE:
+        obecny_uuid = zadanie["uuid"]
+        obecne_zachowanie = zadanie["zachowanie"]
+        obecne_dane = zadanie["dane"] 
+        
+        print(f"\n========================================")
+        print(f"[*] Przechodzę do testowania profilu: {obecny_uuid} (Konto: {obecne_dane['email']})")
+        print(f"========================================")
+        
+        api_start_url = "http://localhost:58888/api/profiles/start"
+        payload = {"uuid": obecny_uuid, "debug_port": True}
+        
+        try:
+            response = requests.post(api_start_url, json=payload).json()
+        except requests.exceptions.ConnectionError:
+            print(f"[!] Błąd Krytyczny: Nie można połączyć się z API Octo dla profilu {obecny_uuid}.")
+            continue 
+
+        ws_endpoint = response.get("ws_endpoint")
+        
+        if ws_endpoint:
+            print(f"[*] Połączono. Adres WebSocket to: {ws_endpoint}")
+            
+            async with async_playwright() as p:
+                browser = await p.chromium.connect_over_cdp(ws_endpoint)
+                context = browser.contexts[0]
+                page = context.pages[0] if context.pages else await context.new_page()
+                
+                await page.set_viewport_size({"width": 1920, "height": 1080})
+                
+                # Uruchomienie wybranego profilu
+                await obecne_zachowanie(page, obecne_dane) 
+                
+                print("\n[*] Zadanie zakończone. Odłączanie Playwrighta.")
+                await browser.close()
+                
+            requests.post("http://localhost:58888/api/profiles/stop", json={"uuid": obecny_uuid})
+            print(f"[*] Zamknięto okno profilu {obecny_uuid}.")
+            
+            if zadanie != ZADANIA_TESTOWE[-1]:
+                await zmien_ip_przez_adb()
+            else:
+                print("[*] To był ostatni profil. Koniec audytu!")
+            
+        else:
+            print(f"[!] Błąd uruchamiania profilu po stronie Octo API: {response}")
+
+if __name__ == "__main__":
+    asyncio.run(main())

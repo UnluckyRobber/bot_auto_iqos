@@ -1,0 +1,370 @@
+# utils.py
+import asyncio
+import random
+import subprocess
+from config import TARGET_URL
+
+# ==========================================
+# MECHANIZMY CZASOWE
+# ==========================================
+async def ludzka_pauza(bazowy_czas):
+    """
+    Dodaje od -30% do +40% losowej wariancji do zadanego czasu bazowego.
+    Zaburza sztuczne wzorce czasowe ("bot heartbeat").
+    """
+    mnoznik = random.uniform(0.7, 1.4)
+    rzeczywisty_czas = bazowy_czas * mnoznik
+    await asyncio.sleep(rzeczywisty_czas)
+
+# ==========================================
+# SYMULACJA KURSORA I KLAWIATURY
+# ==========================================
+async def install_visual_cursor(page):
+    print("[*] Instalowanie wizualnego kursora na stronie...")
+    inject_script = """
+    () => {
+        if (document.getElementById('bot-cursor')) return; 
+        window.botMouseX = window.innerWidth / 2;
+        window.botMouseY = window.innerHeight / 2;
+        const cursor = document.createElement('div');
+        cursor.id = 'bot-cursor';
+        cursor.style.width = '20px';
+        cursor.style.height = '20px';
+        cursor.style.borderRadius = '50%';
+        cursor.style.backgroundColor = 'rgba(255, 0, 0, 0.6)'; 
+        cursor.style.position = 'fixed';
+        cursor.style.pointerEvents = 'none'; 
+        cursor.style.zIndex = '2147483647'; 
+        cursor.style.transform = 'translate(-50%, -50%)';
+        cursor.style.transition = 'transform 0.1s, background-color 0.1s';
+        document.body.appendChild(cursor);
+
+        window.addEventListener('mousemove', (event) => {
+            window.botMouseX = event.clientX;
+            window.botMouseY = event.clientY;
+            cursor.style.left = event.clientX + 'px';
+            cursor.style.top = event.clientY + 'px';
+        });
+        window.addEventListener('mousedown', () => {
+            cursor.style.backgroundColor = 'rgba(0, 255, 0, 0.8)';
+            cursor.style.transform = 'translate(-50%, -50%) scale(0.7)';
+        });
+        window.addEventListener('mouseup', () => {
+            cursor.style.backgroundColor = 'rgba(255, 0, 0, 0.6)';
+            cursor.style.transform = 'translate(-50%, -50%) scale(1)';
+        });
+    }
+    """
+    await page.evaluate(inject_script)
+
+async def smooth_click_element(page, selector, position=None, click_count=1):
+    element = page.locator(selector).first
+    await element.wait_for(state="attached", timeout=10000)
+    box = await element.bounding_box()
+    attempts = 0
+    while not box and attempts < 15:
+        print(f"[*] Nie widzę elementu ({selector}), delikatnie kręcę rolką...")
+        try:
+            is_above = await element.evaluate("el => el.getBoundingClientRect().top < 0")
+        except Exception:
+            is_above = False
+        chunks = random.randint(15, 25)
+        chunk_dist = -15 if is_above else 15
+        for _ in range(chunks):
+            await page.mouse.wheel(0, chunk_dist)
+            await asyncio.sleep(random.uniform(0.01, 0.02))
+        await ludzka_pauza(0.4)
+        box = await element.bounding_box()
+        attempts += 1
+
+    if box:
+        if position:
+            rel_x, rel_y = position["x"], position["y"]
+        else:
+            rel_x = random.randint(10, int(box["width"]) - 10) if int(box["width"]) > 20 else int(box["width"]) / 2
+            rel_y = random.randint(5, int(box["height"]) - 5) if int(box["height"]) > 10 else int(box["height"]) / 2
+        target_x = box["x"] + rel_x
+        target_y = box["y"] + rel_y
+        try:
+            pos = await page.evaluate("() => ({x: window.botMouseX || window.innerWidth/2, y: window.botMouseY || window.innerHeight/2})")
+            start_x, start_y = pos['x'], pos['y']
+        except Exception:
+            start_x, start_y = target_x, target_y - 200
+        waypoint_x = target_x + random.randint(-150, 100)
+        waypoint_y = target_y + random.randint(-100, -30) 
+        steps_1 = random.randint(25, 40)
+        for i in range(1, steps_1 + 1):
+            t = i / steps_1
+            current_x = start_x + (waypoint_x - start_x) * t
+            current_y = start_y + (waypoint_y - start_y) * t
+            await page.mouse.move(current_x, current_y)
+            await asyncio.sleep(random.uniform(0.005, 0.015))
+        steps_2 = random.randint(35, 55)
+        for i in range(1, steps_2 + 1):
+            t = i / steps_2
+            ease_t = 1 - pow(1 - t, 3) 
+            current_x = waypoint_x + (target_x - waypoint_x) * ease_t
+            current_y = waypoint_y + (target_y - waypoint_y) * ease_t
+            await page.mouse.move(current_x, current_y)
+            await asyncio.sleep(random.uniform(0.005, 0.015))
+        await ludzka_pauza(0.4) 
+        for _ in range(click_count):
+            await page.mouse.down()
+            await asyncio.sleep(random.uniform(0.05, 0.15)) 
+            await page.mouse.up()
+            if click_count > 1:
+                await ludzka_pauza(0.2)
+    else:
+        print("[!] Element ukryty przed rolką, wykonuję klik awaryjny.")
+        await element.click(position=position, click_count=click_count)
+
+async def human_type(page, selector, text, mistake_rate=0.0, typing_speed=(50, 150)):
+    await page.wait_for_selector(selector, timeout=10000)
+    await smooth_click_element(page, selector)
+    for char in text:
+        if random.random() < mistake_rate:
+            wrong_char = random.choice(['x', 'q', 'w', 'a', 's'])
+            await page.type(selector, wrong_char, delay=random.randint(*typing_speed))
+            await ludzka_pauza(0.2)
+            await page.keyboard.press("Backspace")
+            await ludzka_pauza(0.2)
+        await page.type(selector, char, delay=random.randint(*typing_speed))
+
+async def type_without_mouse(page, text, mistake_rate=0.0, typing_speed=(50, 150)):
+    """Wpisuje tekst cyfra po cyfrze w aktywnym elemencie, symulując ludzkie błędy numeryczne i Backspace."""
+    for char in text:
+        if random.random() < mistake_rate:
+            wrong_char = str(random.randint(0, 9))
+            await page.keyboard.type(wrong_char, delay=random.randint(*typing_speed))
+            await ludzka_pauza(0.4) 
+            await page.keyboard.press("Backspace")
+            await ludzka_pauza(0.3)
+        await page.keyboard.type(char, delay=random.randint(*typing_speed))
+        await asyncio.sleep(random.uniform(0.05, 0.15))
+
+async def smooth_scroll(page, scrolls=4):
+    for _ in range(scrolls):
+        direction = random.choice([1, 1, 1, -1]) 
+        total_distance = random.randint(200, 600) * direction
+        chunks = random.randint(20, 40)
+        chunk_distance = total_distance / chunks
+        for _ in range(chunks):
+            await page.mouse.wheel(0, chunk_distance)
+            await asyncio.sleep(random.uniform(0.01, 0.03))
+        await ludzka_pauza(1.5)
+
+async def scroll_to_top(page):
+    print("[*] Płynnie przewijam na górę strony...")
+    scroll_y = await page.evaluate("window.scrollY")
+    if scroll_y > 0:
+        chunks = random.randint(50, 80)
+        chunk_distance = -(scroll_y + 50) / chunks 
+        for _ in range(chunks):
+            await page.mouse.wheel(0, chunk_distance)
+            await asyncio.sleep(random.uniform(0.005, 0.015))
+    await ludzka_pauza(1.0)
+
+async def smooth_mouse_and_click(page, actions=5):
+    viewport = page.viewport_size
+    if not viewport:
+        viewport = {'width': 1920, 'height': 1080}
+    try:
+        pos = await page.evaluate("() => ({x: window.botMouseX || window.innerWidth/2, y: window.botMouseY || window.innerHeight/2})")
+        start_x, start_y = pos['x'], pos['y']
+    except Exception:
+        start_x, start_y = viewport['width'] / 2, viewport['height'] / 2
+    for _ in range(actions):
+        end_x = start_x + random.randint(-250, 250)
+        end_y = start_y + random.randint(-150, 200)
+        end_x = max(10, min(end_x, viewport['width'] - 10))
+        end_y = max(10, min(end_y, viewport['height'] - 10))
+        steps = random.randint(30, 60)
+        for i in range(1, steps + 1):
+            t = i / steps
+            ease_t = 2 * t * t if t < 0.5 else 1 - pow(-2 * t + 2, 2) / 2
+            current_x = start_x + (end_x - start_x) * ease_t
+            current_y = start_y + (end_y - start_y) * ease_t
+            await page.mouse.move(current_x, current_y)
+            await asyncio.sleep(random.uniform(0.005, 0.015)) 
+        start_x, start_y = end_x, end_y
+        await ludzka_pauza(1.0)
+
+async def zmien_ip_przez_adb():
+    print("\n[!] ===================================================")
+    print("[!] ZMIANA IP: Włączam tryb samolotowy przez ADB...")
+    print("[!] ===================================================")
+    try:
+        subprocess.run(["adb", "shell", "cmd", "connectivity", "airplane-mode", "enable"], check=True, capture_output=True)
+        for i in range(30, 0, -1):
+            print(f"[*] Tryb samolotowy aktywny. Czekam: {i}s...", end="\r")
+            await asyncio.sleep(1)
+        print("\n[*] ZMIANA IP: Wyłączam tryb samolotowy i przywracam połączenie...")
+        subprocess.run(["adb", "shell", "cmd", "connectivity", "airplane-mode", "disable"], check=True, capture_output=True)
+        print("[*] Czekam 25 sekund na ustabilizowanie nowego połączenia...")
+        await asyncio.sleep(25)
+        print("[*] Gotowe! Nowe IP powinno być aktywne.\n")
+    except FileNotFoundError:
+        print("[!] BŁĄD: Nie znaleziono narzędzia 'adb'. Upewnij się, że masz zainstalowane ADB.")
+    except Exception as e:
+        print(f"[!] BŁĄD ADB podczas zmiany IP: {e}")
+
+# ==========================================
+# OBSŁUGA BANERÓW I WIEKU (HYBRYDA + WARIACJA)
+# ==========================================
+async def obsluga_poczatkowych_popupow(page):
+    """Złożona funkcja imitująca ludzkie zachowanie przy plikach cookies i weryfikacji wieku."""
+    print("[*] Sprawdzam obecność banerów (Cookies, Bramka wiekowa)...")
+    await ludzka_pauza(3.0)
+
+    # 1. OBSŁUGA COOKIES (Reguła 80/20)
+    try:
+        cookie_btn_accept = page.locator('#onetrust-accept-btn-handler')
+        cookie_btn_reject = page.locator('#onetrust-reject-all-handler')
+        
+        if await cookie_btn_accept.is_visible(timeout=3000):
+            await smooth_mouse_and_click(page, actions=random.randint(1, 2))
+            
+            if random.random() < 0.8:
+                print("[*] Widzę baner Cookies. Wariant 80%: AKCEPTUJĘ...")
+                await smooth_click_element(page, '#onetrust-accept-btn-handler')
+            else:
+                print("[*] Widzę baner Cookies. Wariant 20%: ODRZUCAM...")
+                if await cookie_btn_reject.is_visible(timeout=1000):
+                    await smooth_click_element(page, '#onetrust-reject-all-handler')
+                else:
+                    await smooth_click_element(page, '#onetrust-accept-btn-handler')
+                    
+            await ludzka_pauza(3.0) 
+    except Exception:
+        pass 
+
+    # 2. OBSŁUGA BRAMKI WIEKOWEJ
+    print("[*] Poszukuję bramki wiekowej...")
+    try:
+        month_trigger = page.locator('.month-selector .select-styled, a[aria-label="Select your birth month"]').first
+        
+        if await month_trigger.is_visible(timeout=5000):
+            miesiac = str(random.randint(1, 12))
+            rok = str(random.randint(1960, 2006)) # Przedział zaktualizowany pod Twoje wytyczne
+            print(f"[*] Widzę bramkę wiekową. Losuję: {miesiac}/{rok}")
+            
+            # --- Wybór Miesiąca (Klawiatura) ---
+            print("[*] Klikam w pole i piszę miesiąc (cyfra po cyfrze)...")
+            await smooth_mouse_and_click(page, actions=1)
+            await smooth_click_element(page, '.month-selector .select-styled, a[aria-label="Select your birth month"]')
+            await ludzka_pauza(0.8)
+            
+            await type_without_mouse(page, miesiac, mistake_rate=0.1, typing_speed=(100, 250))
+            await ludzka_pauza(0.5)
+            await page.keyboard.press("Enter")
+            
+            await page.evaluate(f'''() => {{
+                let sel = document.querySelector("#dwfrm_agegate_birthMonth, select.months-select");
+                if(sel) {{ sel.value = "{miesiac}"; sel.dispatchEvent(new Event("change", {{bubbles: true}})); }}
+            }}''')
+            await ludzka_pauza(1.0)
+            
+            # --- Wybór Roku (NOWOŚĆ: Fizyczne przewijanie i płynny wybór z ramki) ---
+            print("[*] Klikam w ramkę roku, by ją rozwinąć...")
+            await smooth_mouse_and_click(page, actions=1)
+            
+            # Płynnie najeżdża na rozwijacz roku i klika go
+            await smooth_click_element(page, '.year-selector .select-styled, a[aria-label="Select your birth year"]')
+            await ludzka_pauza(1.2) # Czas na animację otwarcia dropdownu
+            
+            # Budujemy pancerny lokator dla wylosowanego roku dostosowany do obu wersji witryny
+            rok_loc = page.locator(f'.year-selector .select-options li[value="{rok}"], .selectBox-dropdown-menu li a:has-text("{rok}"), .selectBox-options li:has-text("{rok}")').first
+            
+            # Symulacja przewijania rolką w dół po otwarciu ramki (poszukiwanie elementu wzrokiem)
+            print(f"[*] Ramka otwarta. Przewijam rolką w dół w poszukiwaniu roku {rok}...")
+            for _ in range(random.randint(3, 6)):
+                await page.mouse.wheel(0, random.randint(200, 450)) # Losowe skoki scrolla
+                await asyncio.sleep(random.uniform(0.15, 0.35))
+                
+            # Wymuszamy na kontenerze upewnienie się, że element jest w polu widzenia
+            await rok_loc.scroll_into_view_if_needed()
+            await ludzka_pauza(0.8)
+            
+            # Pobieramy fizyczne położenie roku na ekranie i najeżdżamy łukiem bez teleportacji
+            box = await rok_loc.bounding_box()
+            if box:
+                pos_start = await page.evaluate("() => ({x: window.botMouseX || window.innerWidth/2, y: window.botMouseY || window.innerHeight/2})")
+                target_x = box["x"] + box["width"]/2 + random.randint(-6, 6)
+                target_y = box["y"] + box["height"]/2 + random.randint(-4, 4)
+                
+                # Matematyczny ludzki ruch kursora do wybranego roku
+                steps = random.randint(30, 50)
+                for i in range(1, steps + 1):
+                    t = i / steps
+                    ease_t = 1 - pow(1 - t, 3) # Easing Cubic Out
+                    cx = pos_start['x'] + (target_x - pos_start['x']) * ease_t
+                    cy = pos_start['y'] + (target_y - pos_start['y']) * ease_t
+                    await page.mouse.move(cx, cy)
+                    await asyncio.sleep(random.uniform(0.005, 0.012))
+                    
+                await ludzka_pauza(0.5)
+                await page.mouse.down()
+                await asyncio.sleep(random.uniform(0.05, 0.15))
+                await page.mouse.up()
+            else:
+                # Fallback w razie usterki renderu
+                await rok_loc.click()
+                
+            await ludzka_pauza(1.0)
+            
+            # Awaryjnie utrwalamy wartość w ukrytym tagu dla pełnej stabilności sesji
+            await page.evaluate(f'''() => {{
+                let sel = document.querySelector("#dwfrm_agegate_birthYear, select.years-select");
+                if(sel) {{ sel.value = "{rok}"; sel.dispatchEvent(new Event("change", {{bubbles: true}})); }}
+            }}''')
+            await ludzka_pauza(1.5)
+            
+            # --- Potwierdzenie ---
+            print("[*] Dane wiekowe wpisane. Klikam Potwierdź...")
+            await smooth_mouse_and_click(page, actions=random.randint(1, 2))
+            await smooth_click_element(page, '.js-avs-dialog-accept, button:has-text("Potwierdź")')
+            await ludzka_pauza(3.0)
+        else:
+            print("[*] Bramka wiekowa nie pojawiła się (brak elementu).")
+            
+    except Exception as e:
+        print(f"[!] Błąd w trakcie obsługi bramki wiekowej: {e}")
+
+# ==========================================
+# ŻELAZNA NAWIGACJA 
+# ==========================================
+async def force_navigate_to_target(page):
+    print(f"[*] Wymuszam przejście na adres i szukam formularza: {TARGET_URL} ...")
+    form_loaded = False
+    
+    for attempt in range(1, 4):
+        try:
+            if attempt == 1:
+                await page.goto(TARGET_URL, wait_until="domcontentloaded", timeout=15000)
+            elif attempt == 2:
+                print("[!] Próba 2: Używam JavaScript do zmiany URL...")
+                await page.evaluate(f"window.location.href = '{TARGET_URL}'")
+                await ludzka_pauza(4.0)
+            else:
+                print("[!] Próba 3: Twardy reload strony (F5)...")
+                await page.reload(wait_until="load", timeout=15000)
+            
+            try:
+                await install_visual_cursor(page)
+            except Exception:
+                pass
+            
+            await obsluga_poczatkowych_popupow(page)
+                
+            print("[*] Oczekuję na wyrenderowanie formularza w HTML (max 10s)...")
+            await page.locator('label[for="registration"]').first.wait_for(state="attached", timeout=10000)
+            form_loaded = True
+            print("[*] SUKCES! Formularz jest w 100% gotowy do kliknięcia.")
+            break 
+            
+        except Exception as e:
+            print(f"[!] Próba {attempt} nieudana. Komunikat: {e}")
+            await ludzka_pauza(2.0)
+            
+    if not form_loaded:
+        raise Exception("Krytyczny Timeout: Formularz rejestracji nie pojawił się po 3 twardych próbach. Przerywam profil!")

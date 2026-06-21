@@ -1,0 +1,234 @@
+import tkinter as tk
+from tkinter import ttk, messagebox
+import json
+import os
+import subprocess
+import platform
+
+PLIK_ZADAN = "zadania.json"
+
+class BotControllerApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Panel Sterowania - Bot Octo")
+        self.root.geometry("950x650")
+        self.root.configure(padx=10, pady=10)
+        
+        self.zadania = []
+        
+        # Style
+        style = ttk.Style()
+        style.configure("TLabelframe.Label", font=("Arial", 10, "bold"))
+        
+        # Ramki
+        self.frame_inputs = ttk.LabelFrame(self.root, text="Dane Nowego Profilu", padding=(15, 15))
+        self.frame_inputs.pack(fill="x", pady=(0, 15))
+        
+        self.frame_list = ttk.LabelFrame(self.root, text="Kolejka Zadań do Wykonania", padding=(15, 15))
+        self.frame_list.pack(fill="both", expand=True)
+        
+        self.utworz_pola_input()
+        self.utworz_liste_zadan()
+        self.wczytaj_z_pliku()
+
+    def utworz_pola_input(self):
+        # Zmienne
+        self.var_uuid = tk.StringVar()
+        self.var_zachowanie = tk.StringVar()
+        self.var_email = tk.StringVar()
+        self.var_haslo = tk.StringVar()
+        self.var_imie = tk.StringVar()
+        self.var_nazwisko = tk.StringVar()
+        self.var_dzien = tk.StringVar()
+        self.var_miesiac = tk.StringVar()
+        self.var_rok = tk.StringVar()
+        self.var_ulica = tk.StringVar()
+        self.var_miasto = tk.StringVar()
+        self.var_telefon = tk.StringVar()
+
+        profile_opcje = [
+            "profile_zdezorientowany", "profile_mala_klawiatura", 
+            "profile_rozproszony", "profile_sceptyk", 
+            "profile_wizualny", "profile_zabiegany", "profile_nerwowy"
+        ]
+
+        # Wiersz 0
+        ttk.Label(self.frame_inputs, text="UUID Octo:").grid(row=0, column=0, sticky="w", pady=5)
+        ttk.Entry(self.frame_inputs, textvariable=self.var_uuid, width=35).grid(row=0, column=1, padx=5, pady=5)
+        
+        ttk.Label(self.frame_inputs, text="Zachowanie Bota:").grid(row=0, column=2, sticky="w", padx=(20,0), pady=5)
+        combo_zachowanie = ttk.Combobox(self.frame_inputs, textvariable=self.var_zachowanie, values=profile_opcje, state="readonly", width=32)
+        combo_zachowanie.grid(row=0, column=3, padx=5, pady=5)
+        if profile_opcje: combo_zachowanie.current(0)
+
+        # Wiersz 1
+        ttk.Label(self.frame_inputs, text="E-mail:").grid(row=1, column=0, sticky="w", pady=5)
+        ttk.Entry(self.frame_inputs, textvariable=self.var_email, width=35).grid(row=1, column=1, padx=5, pady=5)
+        
+        ttk.Label(self.frame_inputs, text="Hasło:").grid(row=1, column=2, sticky="w", padx=(20,0), pady=5)
+        ttk.Entry(self.frame_inputs, textvariable=self.var_haslo, width=35).grid(row=1, column=3, padx=5, pady=5)
+
+        # Wiersz 2
+        ttk.Label(self.frame_inputs, text="Imię:").grid(row=2, column=0, sticky="w", pady=5)
+        ttk.Entry(self.frame_inputs, textvariable=self.var_imie, width=35).grid(row=2, column=1, padx=5, pady=5)
+        
+        ttk.Label(self.frame_inputs, text="Nazwisko:").grid(row=2, column=2, sticky="w", padx=(20,0), pady=5)
+        ttk.Entry(self.frame_inputs, textvariable=self.var_nazwisko, width=35).grid(row=2, column=3, padx=5, pady=5)
+
+        # Wiersz 3
+        ttk.Label(self.frame_inputs, text="Data Ur. (DD/MM/YYYY):").grid(row=3, column=0, sticky="w", pady=5)
+        frame_data = ttk.Frame(self.frame_inputs)
+        frame_data.grid(row=3, column=1, sticky="w", padx=5, pady=5)
+        ttk.Entry(frame_data, textvariable=self.var_dzien, width=5).pack(side="left")
+        ttk.Label(frame_data, text=" / ").pack(side="left")
+        ttk.Entry(frame_data, textvariable=self.var_miesiac, width=5).pack(side="left")
+        ttk.Label(frame_data, text=" / ").pack(side="left")
+        ttk.Entry(frame_data, textvariable=self.var_rok, width=8).pack(side="left")
+
+        ttk.Label(self.frame_inputs, text="Telefon:").grid(row=3, column=2, sticky="w", padx=(20,0), pady=5)
+        ttk.Entry(self.frame_inputs, textvariable=self.var_telefon, width=35).grid(row=3, column=3, padx=5, pady=5)
+
+        # Wiersz 4
+        ttk.Label(self.frame_inputs, text="Ulica i nr:").grid(row=4, column=0, sticky="w", pady=5)
+        ttk.Entry(self.frame_inputs, textvariable=self.var_ulica, width=35).grid(row=4, column=1, padx=5, pady=5)
+        
+        ttk.Label(self.frame_inputs, text="Miasto:").grid(row=4, column=2, sticky="w", padx=(20,0), pady=5)
+        ttk.Entry(self.frame_inputs, textvariable=self.var_miasto, width=35).grid(row=4, column=3, padx=5, pady=5)
+
+        # Wiersz 5 - Przycisk
+        btn_dodaj = tk.Button(self.frame_inputs, text="➕ Dodaj do Kolejki", bg="#4CAF50", fg="white", font=("Arial", 10, "bold"), command=self.dodaj_zadanie)
+        btn_dodaj.grid(row=5, column=0, columnspan=4, pady=15)
+
+    def utworz_liste_zadan(self):
+        kolumny = ("uuid", "profil", "email", "imie", "nazwisko", "telefon")
+        self.drzewo = ttk.Treeview(self.frame_list, columns=kolumny, show="headings", height=10)
+        
+        self.drzewo.heading("uuid", text="UUID Octo")
+        self.drzewo.heading("profil", text="Profil Zachowania")
+        self.drzewo.heading("email", text="E-mail")
+        self.drzewo.heading("imie", text="Imię")
+        self.drzewo.heading("nazwisko", text="Nazwisko")
+        self.drzewo.heading("telefon", text="Telefon")
+
+        self.drzewo.column("uuid", width=150, anchor="center")
+        self.drzewo.column("profil", width=150, anchor="center")
+        self.drzewo.column("email", width=180)
+        self.drzewo.column("imie", width=100)
+        self.drzewo.column("nazwisko", width=100)
+        self.drzewo.column("telefon", width=100, anchor="center")
+        
+        self.drzewo.pack(fill="both", expand=True, pady=(0, 10))
+
+        # --- RAMKA Z PRZYCISKAMI ---
+        frame_przyciski = ttk.Frame(self.frame_list)
+        frame_przyciski.pack(fill="x", pady=5)
+
+        btn_usun = tk.Button(frame_przyciski, text="❌ Usuń zaznaczone", bg="#f44336", fg="white", command=self.usun_zaznaczone)
+        btn_usun.pack(side="left", padx=5)
+
+        btn_wyczysc = tk.Button(frame_przyciski, text="🗑 Wyczyść całą listę", command=self.wyczysc_liste)
+        btn_wyczysc.pack(side="left", padx=5)
+
+        # NOWY PRZYCISK STARTOWY
+        btn_uruchom = tk.Button(frame_przyciski, text="🚀 ZAPISZ I URUCHOM BOTA", bg="#FF9800", fg="white", font=("Arial", 11, "bold"), command=self.zapisz_i_uruchom)
+        btn_uruchom.pack(side="right", padx=5)
+
+        btn_zapisz = tk.Button(frame_przyciski, text="💾 Tylko Zapisz", bg="#2196F3", fg="white", font=("Arial", 10), command=self.zapisz_do_pliku)
+        btn_zapisz.pack(side="right", padx=5)
+
+    def dodaj_zadanie(self):
+        if not self.var_email.get():
+            messagebox.showwarning("Błąd", "Pole E-mail jest wymagane!")
+            return
+
+        nowe_zadanie = {
+            "uuid": self.var_uuid.get().strip(),
+            "zachowanie": self.var_zachowanie.get(),
+            "dane": {
+                "email": self.var_email.get().strip(),
+                "haslo": self.var_haslo.get().strip(),
+                "imie": self.var_imie.get().strip(),
+                "nazwisko": self.var_nazwisko.get().strip(),
+                "dzien_ur": self.var_dzien.get().strip(),
+                "miesiac_ur": self.var_miesiac.get().strip(),
+                "rok_ur": self.var_rok.get().strip(),
+                "ulica": self.var_ulica.get().strip(),
+                "miasto": self.var_miasto.get().strip(),
+                "telefon": self.var_telefon.get().strip()
+            }
+        }
+        
+        self.zadania.append(nowe_zadanie)
+        self.odswiez_tabele()
+        
+        # Czyszczenie tylko konkretnych pól po dodaniu (żeby łatwiej dodawać kolejne)
+        self.var_uuid.set("")
+        self.var_email.set("")
+        self.var_imie.set("")
+        self.var_nazwisko.set("")
+
+    def odswiez_tabele(self):
+        for item in self.drzewo.get_children():
+            self.drzewo.delete(item)
+        for z in self.zadania:
+            self.drzewo.insert("", "end", values=(
+                z["uuid"], z["zachowanie"], z["dane"]["email"], 
+                z["dane"]["imie"], z["dane"]["nazwisko"], z["dane"]["telefon"]
+            ))
+
+    def usun_zaznaczone(self):
+        selected = self.drzewo.selection()
+        if not selected: return
+        for item in selected:
+            wartosci = self.drzewo.item(item, "values")
+            self.zadania = [z for z in self.zadania if not (z["uuid"] == wartosci[0] and z["dane"]["email"] == wartosci[2])]
+            self.drzewo.delete(item)
+
+    def wyczysc_liste(self):
+        if messagebox.askyesno("Potwierdzenie", "Czy na pewno chcesz usunąć wszystkie zadania z listy?"):
+            self.zadania = []
+            self.odswiez_tabele()
+
+    def zapisz_do_pliku(self, pokaz_info=True):
+        try:
+            with open(PLIK_ZADAN, "w", encoding="utf-8") as f:
+                json.dump(self.zadania, f, indent=4, ensure_ascii=False)
+            if pokaz_info:
+                messagebox.showinfo("Sukces", f"Zapisano {len(self.zadania)} zadań do pliku.")
+            return True
+        except Exception as e:
+            messagebox.showerror("Błąd", f"Wystąpił błąd podczas zapisu:\n{e}")
+            return False
+
+    def zapisz_i_uruchom(self):
+        if not self.zadania:
+            messagebox.showwarning("Błąd", "Kolejka zadań jest pusta! Dodaj konto przed uruchomieniem.")
+            return
+            
+        # Zapisuje plik w tle (bez wyskakującego powiadomienia o sukcesie zapisu)
+        zapisano = self.zapisz_do_pliku(pokaz_info=False)
+        
+        if zapisano:
+            try:
+                # Otwiera całkowicie osobne okno CMD i uruchamia w nim main.py. 
+                # "/k" sprawia, że konsola nie zamknie się od razu po błędzie, więc będziesz widział logi.
+                if platform.system() == "Windows":
+                    subprocess.Popen(["start", "cmd", "/k", "python", "main.py"], shell=True)
+                else:
+                    subprocess.Popen(["python", "main.py"]) # Fallback dla Mac/Linux
+            except Exception as e:
+                messagebox.showerror("Błąd", f"Nie udało się uruchomić pliku main.py:\n{e}")
+
+    def wczytaj_z_pliku(self):
+        if os.path.exists(PLIK_ZADAN):
+            try:
+                with open(PLIK_ZADAN, "r", encoding="utf-8") as f:
+                    self.zadania = json.load(f)
+                self.odswiez_tabele()
+            except Exception:
+                pass
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = BotControllerApp(root)
+    root.mainloop()

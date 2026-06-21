@@ -1,0 +1,18 @@
+[
+    {
+        "uuid": "ed31e7a39ce940f09328ffe77907e9f6",
+        "zachowanie": "profile_sceptyk",
+        "dane": {
+            "email": "Eliza@Eliza.pl",
+            "haslo": "Budaaaw1",
+            "imie": "Eliza",
+            "nazwisko": "Wlaźlak",
+            "dzien_ur": "26",
+            "miesiac_ur": "05",
+            "rok_ur": "1979",
+            "ulica": "ulica Staffa 84/01",
+            "miasto": "Chrzanów",
+            "telefon": "777888999"
+        }
+    }
+]
