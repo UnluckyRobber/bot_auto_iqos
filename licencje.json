@@ -24,5 +24,11 @@
         "aktywna": true,
         "czas_trwania_minuty": 1440,
         "wygasa_o": null
+    },
+    "STANDARD-1-MIN": {
+        "hwid": null,
+        "aktywna": true,
+        "czas_trwania_minuty": 1,
+        "wygasa_o": null
     }
 }
