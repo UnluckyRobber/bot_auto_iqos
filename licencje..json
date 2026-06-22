@@ -7,4 +7,22 @@
         "hwid": null,
         "aktywna": true
     }
+    "TEST-30-MINUT": {
+        "hwid": null,
+        "aktywna": true,
+        "czas_trwania_minuty": 30,
+        "wygasa_o": null
+    },
+    "TRIAL-1-GODZINA": {
+        "hwid": null,
+        "aktywna": true,
+        "czas_trwania_minuty": 60,
+        "wygasa_o": null
+    },
+    "STANDARD-1-DZIEN": {
+        "hwid": null,
+        "aktywna": true,
+        "czas_trwania_minuty": 1440,
+        "wygasa_o": null
+    }
 }
