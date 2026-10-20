@@ -231,8 +231,8 @@ def get_otp_from_mailcow(main_email, main_password, target_alias, imap_server):
 
 # --- GŁÓWNA AUTOMATYZACJA ---
 def run(playwright):
-    MAIN_MAILBOX = "admin@yuhoo.pl"
-    MAIN_PASSWORD = "2C3ombc94236977"
+    MAIN_MAILBOX = "admin@mailninja.pl"
+    MAIN_PASSWORD = "Buda1212@"
     IMAP_SERVER = "mail.yuhoo.pl"
 
     first_names = [
